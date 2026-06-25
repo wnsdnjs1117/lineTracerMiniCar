@@ -147,8 +147,9 @@ void determinNextState() {
   }
   // 7. 교차로 또는 정지선 (111) -> 후진
   else if(LSV == 1 && CSV == 1 && RSV == 1) {
-    if(lastTurn == 0) nextState = STATE_SPIN_L;
-    else nextState = STATE_SPIN_R;
+    // if(lastTurn == 0) nextState = STATE_SPIN_L;
+    // else nextState = STATE_SPIN_R;
+    nextState = STATE_FWD;
   }
 }
 
@@ -170,29 +171,29 @@ void excuteState() {
         
       // ---- 소프트 턴 (한쪽 바퀴 0, 한쪽 바퀴 200 전진) ----
       case STATE_SOFT_L :
-        setMotor(0, 200, true, true); 
-        displayStatus("SOFT L_TURN", 0, 200); 
+        setMotor(90, 220, true, true); 
+        displayStatus("SOFT L_TURN", 100, 220); 
         break;
         
       case STATE_SOFT_R :  
-        setMotor(200, 0, true, true); 
-        displayStatus("SOFT R_TURN", 200, 0);
+        setMotor(220, 90, true, true); 
+        displayStatus("SOFT R_TURN", 220, 100);
         break;
         
       // ---- 하드 턴 (꺾는 방향의 바퀴는 100으로 역회전, 반대쪽은 200 전진) ----
       case STATE_HARD_L :
-        setMotor(100, 200, true, false); // 왼쪽은 false(역회전)로 100
-        displayStatus("HARD L_TURN", -100, 200); 
+        setMotor(0, 200, true, true); // 왼쪽은 false(역회전)로 100
+        displayStatus("HARD L_TURN", 0, 200); 
         break;
         
       case STATE_HARD_R :  
-        setMotor(200, 100, false, true); // 오른쪽은 false(역회전)로 100
-        displayStatus("HARD R_TURN", 200, -100);
+        setMotor(200, 0, true, true); // 오른쪽은 false(역회전)로 100
+        displayStatus("HARD R_TURN", 200, 0);
         break;
         
       // ---- 후진 및 제자리 스핀턴 ----
       case STATE_BWD :     
-        setMotor(200, 200, false, false); // 양쪽 모두 후진으로 속도 200
+        setMotor(200, 200, false, false); // 양쪽 모두 후진으로 속도 220
         displayStatus("ROBOT BWD", -200, -200);
         break;
         
