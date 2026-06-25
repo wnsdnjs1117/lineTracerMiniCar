@@ -41,11 +41,13 @@ RS---D13
 enum RobotState {
   STATE_STOP,   // 정지 상태
   STATE_FWD,    // 직진 상태
-  STATE_L_TURN, // 좌회전 상태
-  STATE_R_TURN, // 우회전 상태
+  STATE_SOFT_L, // 소프트 좌회전 (한쪽 정지)
+  STATE_HARD_L, // 하드 좌회전 (한쪽 역회전)
+  STATE_SOFT_R, // 소프트 우회전 (한쪽 정지)
+  STATE_HARD_R, // 하드 우회전 (한쪽 역회전)
   STATE_BWD,    // 후진 상태
-  STATE_SPIN_L, // 왼쪽 스핀턴 상태 (추가됨)
-  STATE_SPIN_R  // 오른쪽 스핀턴 상태 (추가됨)
+  STATE_SPIN_L, // 왼쪽 제자리 스핀턴 (라인 이탈 시)
+  STATE_SPIN_R  // 오른쪽 제자리 스핀턴 (라인 이탈 시)
 };
 
 // FSM 제어를 위한 현재 상태와 다음 상태를 저장할 변수를 선언
@@ -59,7 +61,7 @@ int lastTurn = 0;
 LiquidCrystal_I2C lcd(0x27, 16, 2);
 
 // 모터 제어 함수 정의
-// 스핀턴을 위해 왼쪽/오른쪽 바퀴의 회전 방향(전/후진)을 각각 제어할 수 있도록 수정
+// 스핀턴 및 하드턴을 위해 왼쪽/오른쪽 바퀴의 회전 방향(전/후진)을 각각 제어
 void setMotor(int leftPwm, int rightPwm, bool leftFwd = true, bool rightFwd = true) {
   // 왼쪽 모터 전/후진 방향 설정
   digitalWrite(IN1, leftFwd ? HIGH : LOW);  
@@ -114,28 +116,39 @@ void determinNextState() {
   String SensorValue = String(LSV) + String(CSV) + String(RSV);
   Serial.println("Sensor=" + SensorValue);
 
-  // 1. 센서가 000 (라인 이탈)일 때: 마지막으로 꺾었던 방향을 토대로 스핀턴
+  // 1. 라인 이탈 (000) -> 기억된 마지막 방향으로 스핀턴
   if(LSV == 0 && CSV == 0 && RSV == 0) {
     if(lastTurn == 0) nextState = STATE_SPIN_L;
     else nextState = STATE_SPIN_R;
   }
-  // 2. 직진
+  // 2. 직진 (010)
   else if(LSV == 0 && CSV == 1 && RSV == 0) {
     nextState = STATE_FWD;
   }
-  // 3. 좌회전 (왼쪽 센서 감지 시 방향 기억)
+  // 3. 소프트 좌회전 (110)
+  else if(LSV == 1 && CSV == 1 && RSV == 0) {
+    nextState = STATE_SOFT_L;
+    lastTurn = 0; // 마지막 방향 '왼쪽'으로 기억
+  }
+  // 4. 하드 좌회전 (100)
   else if(LSV == 1 && CSV == 0 && RSV == 0) {
-    nextState = STATE_L_TURN;
-    lastTurn = 0; // 마지막 턴을 '왼쪽'으로 기억
+    nextState = STATE_HARD_L;
+    lastTurn = 0; // 마지막 방향 '왼쪽'으로 기억
   }
-  // 4. 우회전 (오른쪽 센서 감지 시 방향 기억)
+  // 5. 소프트 우회전 (011)
+  else if(LSV == 0 && CSV == 1 && RSV == 1) {
+    nextState = STATE_SOFT_R;
+    lastTurn = 1; // 마지막 방향 '오른쪽'으로 기억
+  }
+  // 6. 하드 우회전 (001)
   else if(LSV == 0 && CSV == 0 && RSV == 1) {
-    nextState = STATE_R_TURN;
-    lastTurn = 1; // 마지막 턴을 '오른쪽'으로 기억
+    nextState = STATE_HARD_R;
+    lastTurn = 1; // 마지막 방향 '오른쪽'으로 기억
   }
-  // 5. 후진
+  // 7. 교차로 또는 정지선 (111) -> 후진
   else if(LSV == 1 && CSV == 1 && RSV == 1) {
-    nextState = STATE_BWD;
+    if(lastTurn == 0) nextState = STATE_SPIN_L;
+    else nextState = STATE_SPIN_R;
   }
 }
 
@@ -151,34 +164,46 @@ void excuteState() {
         break;
         
       case STATE_FWD :
-        setMotor(200, 200); // 요청하신 전진 속도 200, 200
-        displayStatus("ROBOT FWD", 250, 250);
+        setMotor(200, 200, true, true); 
+        displayStatus("ROBOT FWD", 200, 200);
         break;
         
-      case STATE_L_TURN :
-        setMotor(0, 200); // 왼쪽은 멈추고 오른쪽 바퀴를 200으로 돌려 좌회전
-        displayStatus("ROBOT L_TURN", 0, 250); 
+      // ---- 소프트 턴 (한쪽 바퀴 0, 한쪽 바퀴 200 전진) ----
+      case STATE_SOFT_L :
+        setMotor(0, 200, true, true); 
+        displayStatus("SOFT L_TURN", 0, 200); 
         break;
         
-      case STATE_R_TURN :  
-        setMotor(200, 0); // 오른쪽은 멈추고 왼쪽 바퀴를 200으로 돌려 우회전
-        displayStatus("ROBOT R_TURN", 250, 0);
+      case STATE_SOFT_R :  
+        setMotor(200, 0, true, true); 
+        displayStatus("SOFT R_TURN", 200, 0);
         break;
         
+      // ---- 하드 턴 (꺾는 방향의 바퀴는 100으로 역회전, 반대쪽은 200 전진) ----
+      case STATE_HARD_L :
+        setMotor(100, 200, true, false); // 왼쪽은 false(역회전)로 100
+        displayStatus("HARD L_TURN", -100, 200); 
+        break;
+        
+      case STATE_HARD_R :  
+        setMotor(200, 100, false, true); // 오른쪽은 false(역회전)로 100
+        displayStatus("HARD R_TURN", 200, -100);
+        break;
+        
+      // ---- 후진 및 제자리 스핀턴 ----
       case STATE_BWD :     
-        setMotor(200, 200, true, true); // 양쪽 모두 후진으로 속도 200
-        displayStatus("ROBOT BWD", 250, 250);
+        setMotor(200, 200, false, false); // 양쪽 모두 후진으로 속도 200
+        displayStatus("ROBOT BWD", -200, -200);
         break;
         
-      // 새롭게 추가된 스핀턴 로직 (한쪽은 후진, 한쪽은 전진)
       case STATE_SPIN_L :
-        setMotor(200, 200, true, false); // 왼쪽 바퀴 후진, 오른쪽 바퀴 전진 (제자리 좌회전)
-        displayStatus("SPIN LEFT", 250, 250);
+        setMotor(200, 200, true, false); // 왼쪽 바퀴 후진, 오른쪽 바퀴 전진
+        displayStatus("SPIN LEFT", -200, 200);
         break;
         
       case STATE_SPIN_R :
-        setMotor(200, 200, false, true); // 왼쪽 바퀴 전진, 오른쪽 바퀴 후진 (제자리 우회전)
-        displayStatus("SPIN RIGHT", 250, 250);
+        setMotor(200, 200, false, true); // 왼쪽 바퀴 전진, 오른쪽 바퀴 후진
+        displayStatus("SPIN RIGHT", 200, -200);
         break;
     }
   }
@@ -187,5 +212,5 @@ void excuteState() {
 void loop() {
   determinNextState();
   excuteState();
-  delay(10);
+  delay(10); // 상태 판단 주기 (필요시 조절)
 }
